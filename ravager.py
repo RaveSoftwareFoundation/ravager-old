@@ -1,8 +1,10 @@
 #!/usr/bin/python3
-from io import BytesIO, StringIO
+from io import BytesIO
 import json
+from termios import FF1
 import zipfile
-
+import os
+import shutil
 
 try:
     import requests
@@ -42,6 +44,7 @@ def cmd_repoinstall():
         print("syntax: ravager ir user/repo")
         exit(1)
     repo = sys.argv[2]
+
     print(f"Looking for '{repo}'...")
     try:
         pack = requests.get(f"https://raw.githubusercontent.com/{repo}/main/pack.json")
@@ -53,6 +56,9 @@ def cmd_repoinstall():
         pack = pack.json()
     except Exception as e:
         print(f"pack.json is invalid - {e}")
+        exit(1)
+    if os.path.isdir(f"./pkgs/{pack['id']}/"):
+        print("Package is already installed. If you want to update, use 'u' instead.")
         exit(1)
     print(f"Package '{pack['name']}' v{pack['version']} found, installing...")
     try:
@@ -68,19 +74,68 @@ def cmd_repoinstall():
         print(f"An error occured while unzipping dist - {ex}")
         exit(1)
     open(f"./pkgs/{pack['id']}/pack.json", "w").write(json.dumps(pack))
+    print(f"Warning: this is github package, so you should use id '{pack['id']}' for commands like 'r' or 'u'.")
     print("Done.")
 
 def cmd_update():
-    print("Updating is not available yet. Use 'r', then 'i'/'ir'.")
-    exit(1)
+    if len(sys.argv) < 3:
+        print("syntax: ravager u packageid")
+        exit(1)
+    id = sys.argv[2]
+    if not os.path.isfile(f"./pkgs/{id}/pack.json"):
+        print(f"Package {id} doesn't exist!")
+        exit(1)
+    pack = json.loads(open(f"./pkgs/{id}/pack.json").read())
+    print(f"Looking for '{id}' online...")
+    try:
+        packre = requests.get(f"https://raw.githubusercontent.com/{pack['source']}/main/pack.json")
+        packre.raise_for_status()
+    except Exception as e:
+        print(f"An error occured while looking for '{id}' - {e}")
+        exit(1)
+    try:
+        packre = packre.json()
+    except Exception as e:
+        print(f"remote pack.json is invalid - {e}")
+        exit(1)
+    if packre["version"] <= pack["version"]:
+        print(f"Package '{id}' is already up-to-date!")
+        exit(0)
+    print(f"Removing old package...")
+    shutil.rmtree(f"./pkgs/{id}/")
+    print(f"Installing remote...")
+    try:
+        dist = requests.get(f"https://raw.githubusercontent.com/{pack['source']}/main/pack.{packre['version']}.dist")
+        dist.raise_for_status()
+    except Exception as ex:
+        print(f"An error occured while getting '{packre['name']}' - {ex}")
+        exit(1)
+    try:
+        z = zipfile.ZipFile(BytesIO(dist.content))
+        z.extractall("./pkgs/")
+    except Exception as ex:
+        print(f"An error occured while unzipping dist - {ex}")
+        exit(1)
+    open(f"./pkgs/{packre['id']}/pack.json", "w").write(json.dumps(packre))
+    print(f"Warning: this is github package, so you should use id '{packre['id']}' for commands like 'r' or 'u'.")
+    print("Done.")
 
 def cmd_remove():
-    print("Removing is not available yet. Use command line to remove package.")
-    exit(1)
+    if len(sys.argv) < 3:
+        print("syntax: ravager r packageid")
+    if not os.path.isdir(f"./pkgs/{sys.argv[2]}"):
+        print("Package doesn't exist!")
+        exit(1)
+    shutil.rmtree(f"./pkgs/{sys.argv[2]}/")
+    print("Done.")
 
 def cmd_list():
-    print("List is not available yet. Use command line to see packages.")
-    exit(1)
+    packages = [x[0] for x in os.walk("./pkgs/")]
+    for i in packages:
+        if os.path.isfile(f"{i}/pack.json"):
+            pack = json.loads(open(f"{i}/pack.json").read())
+            print(f"{pack['name']} ({pack['id']}), v{pack['version']}")
+    print(f"{len(packages)} packages total.")
 
 def cmd_search():
     print("RSF repo search is not available yet.")
